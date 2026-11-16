@@ -1,0 +1,76 @@
+name: Publish QORNET
+
+on:
+  workflow_dispatch:
+    inputs:
+      import_source:
+        description: Import the prepared QORNET source package
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths-ignore:
+      - qornet-source.zip
+      - README.md
+      - .github/workflows/pages.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  import:
+    if: github.event_name == 'workflow_dispatch' && inputs.import_source
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Commit the prepared sources
+        run: |
+          test ! -f package.json
+          unzip -oq qornet-source.zip
+          test -f package.json
+          test -f public/presentation.html
+          git rm qornet-source.zip
+          git add -- .
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Import QORNET project sources and presentation"
+          git push origin HEAD:main
+
+  build:
+    needs: import
+    if: ${{ !cancelled() && (needs.import.result == 'success' || needs.import.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:pages
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy QORNET
+        id: deployment
+        uses: actions/deploy-pages@v4
